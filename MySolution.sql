@@ -22,50 +22,39 @@ from dim_product
 group by segment
 order by product_count desc;
 
+
 # Query 4
 WITH product_count_2020 as (
-	select segment, count(distinct fact_sales_monthly.product_code) as pc_2020
-    from fact_sales_monthly
-    inner join dim_product
-    on fact_sales_monthly.product_code = dim_product.product_code
-    where fact_sales_monthly.fiscal_year = 2020
-    group by segment),
+	select dim_product.segment, count(distinct fact_gross_price.product_code) as pc_2020
+    from dim_product
+    inner join fact_gross_price
+	on fact_gross_price.product_code = dim_product.product_code
+	where fact_gross_price.fiscal_year = 2020
+	group by segment),
 product_count_2021 as (
-	select segment, count(distinct fact_sales_monthly.product_code) as pc_2021
-    from fact_sales_monthly
-    inner join dim_product
-    on fact_sales_monthly.product_code = dim_product.product_code
-    where fact_sales_monthly.fiscal_year = 2021
-    group by segment)
-SELECT distinct product_count_2020.segment, product_count_2020.pc_2020,
+	select dim_product.segment, count(distinct fact_gross_price.product_code) as pc_2021
+    from dim_product
+    inner join fact_gross_price
+	on fact_gross_price.product_code = dim_product.product_code
+	where fact_gross_price.fiscal_year = 2021
+	group by segment)
+SELECT product_count_2021.segment, product_count_2020.pc_2020,
 product_count_2021.pc_2021, (product_count_2021.pc_2021 - product_count_2020.pc_2020) as difference
 FROM product_count_2020
 inner join product_count_2021
 on product_count_2020.segment = product_count_2021.segment
 order by difference desc;
 
--- first we calculate segment wise (group by) product count for the year 2020
--- second we calculate segment wise (group by) product count for the year 2021
--- segment comes from dim_product table and fiscal year comes from fact_sales_monthly table
--- product_code is common column which is used to join both tables 
--- now after making the CTE from first and second
--- we have two new temp tables with segment as common column
--- taking segment column from anyone table, count for 2020, count for 2021, and calculating
--- the difference
--- we again join both temp tables via common segment column
--- using group by again is not required as the counts are already aggregated in CTE quries
--- at last we order by the table in desc order of difference as requested
-
 
 # Query 5
 WITH highest as (
-	select dim_product.product_code, dim_product.product, fact_manufacturing_cost.manufacturing_cost
+	select dim_product.segment, dim_product.product_code, dim_product.product, fact_manufacturing_cost.manufacturing_cost
 	from dim_product
 	inner join fact_manufacturing_cost
 	on dim_product.product_code = fact_manufacturing_cost.product_code
 	order by manufacturing_cost desc limit 1),
 lowest as (
-	select dim_product.product_code, dim_product.product, fact_manufacturing_cost.manufacturing_cost
+	select dim_product.segment, dim_product.product_code, dim_product.product, fact_manufacturing_cost.manufacturing_cost
 	from dim_product
 	inner join fact_manufacturing_cost
 	on dim_product.product_code = fact_manufacturing_cost.product_code
@@ -86,7 +75,8 @@ GROUP BY dim_customer.customer_code, dim_customer.customer
 ORDER BY avg_discount_pct DESC LIMIT 5;
 
 # Query 7
-select monthname(fact_sales_monthly.date), year(fact_sales_monthly.date), ROUND(sum(fact_sales_monthly.sold_quantity * fact_gross_price.gross_price) / 1000000,2) as gross_sales_amount
+select monthname(fact_sales_monthly.date), year(fact_sales_monthly.date), 
+ROUND(sum(fact_sales_monthly.sold_quantity * fact_gross_price.gross_price),2) as gross_sales_amount
 from fact_sales_monthly
 join dim_customer on dim_customer.customer_code = fact_sales_monthly.customer_code
 join fact_gross_price on fact_sales_monthly.product_code = fact_gross_price.product_code
@@ -95,55 +85,54 @@ group by monthname(fact_sales_monthly.date), year(fact_sales_monthly.date);
 
 
 # Query 8
-select quarter(fact_sales_monthly.date) as quarter, sum(fact_sales_monthly.sold_quantity) as total_sold_quantity
+select 
+	case
+		when month(fact_sales_monthly.date) in (9,10,11) then "Q1"
+        when month(fact_sales_monthly.date) in (12,1,2) then "Q2"
+        when month(fact_sales_monthly.date) in (3,4,5) then "Q3"
+        when month(fact_sales_monthly.date) in (6,7,8) then "Q4"
+	end as Quater,
+    sum(fact_sales_monthly.sold_quantity) as total_sold_quantity
 from fact_sales_monthly
-where year(fact_sales_monthly.date) = 2020
-group by quarter(fact_sales_monthly.date)
+where fact_sales_monthly.fiscal_year = 2020
+group by Quater
 order by total_sold_quantity desc;
 
 
 # Query 9
 WITH gross_sales as (
-	select dim_customer.channel, ROUND(SUM(fact_sales_monthly.sold_quantity * fact_gross_price.gross_price)/ 1000000, 2) as gross_sales_mln
+	select dim_customer.channel, 
+    ROUND(SUM((fact_sales_monthly.sold_quantity * fact_gross_price.gross_price)/ 1000000), 2) as gross_sales_mln
 	from dim_customer
 	join fact_sales_monthly on dim_customer.customer_code = fact_sales_monthly.customer_code
 	join fact_gross_price on fact_sales_monthly.product_code = fact_gross_price.product_code
-	where fact_sales_monthly.fiscal_year = 2021 and fact_gross_price.fiscal_year = 2021
+	where fact_sales_monthly.fiscal_year = 2021
 	group by dim_customer.channel),
 percentage as (
 	select SUM(gross_sales.gross_sales_mln) as total
     from gross_sales)
-SELECT gross_sales.channel, gross_sales.gross_sales_mln, ROUND((gross_sales.gross_sales_mln / percentage.total) *100 , 2 ) as pct_share
-from gross_sales, percentage;
-
--- in this we calculated gross sales in million by multiplying sold quantities by gross price 
--- data was from 3 tables so we joined accordingly 
--- request was about fiscal year 2021 and group by channels
--- to calculate total we took the gross sales value from first cte and added it for all channels 
--- at last we calculated percentage by dividing each channel share by total and mult by 100
+SELECT gross_sales.channel, gross_sales.gross_sales_mln, 
+ROUND((gross_sales.gross_sales_mln / percentage.total) * 100 , 2 ) as pct_share
+from gross_sales, percentage
+order by pct_share desc;
 
 
 # Query 10
-
-with ranking as (
-	select dim_product.division, dim_product.product_code, dim_product.product, fact_sales_monthly.sold_quantity, 
-	dense_rank() over(partition by dim_product.division order by fact_sales_monthly.sold_quantity desc) as rank_order
+with total_sold_quantity as (
+	select dim_product.division, dim_product.product_code, dim_product.product, 
+    dim_product.variant, sum(fact_sales_monthly.sold_quantity) as sold_quantity
 	from dim_product
 	inner join fact_sales_monthly
 	on fact_sales_monthly.product_code = dim_product.product_code
-	where fact_sales_monthly.fiscal_year = 2021)
-select division, product_code, product, sold_quantity, rank_order
-from ranking
-where rank_order <= 3
-order by division, rank_order;
-
--- in this we took division, product_code, product from dim_product table
--- and sold_quantity from fact_sales_monthly table
--- within the cte keeping most of the things as is
--- we calculated the rank on the basis of sold_quantities within each division
--- dense_rank is perfect for this use case as it does not skip rank in case of ties 
--- we partitioned the data on the basis of division (partition by) and then ordered them by sold quantities (order by)
--- in descending order and dense rank() gave the rank to them 
--- also there is 2021 fiscal year where clause as requested 
--- in final select statement we extracted data from our ranking cte and put condition so that only top 3 ranks are shown
--- them ordering them by division and rank order in ascending order 
+	where fact_sales_monthly.fiscal_year = 2021
+    group by dim_product.division, dim_product.product_code, dim_product.product, dim_product.variant),
+ranking as (
+	select division, product_code, product, variant, sold_quantity,
+    dense_rank() over(partition by division order by sold_quantity desc) as ranking_order
+    from total_sold_quantity)    
+select total_sold_quantity.division, total_sold_quantity.product_code, 
+total_sold_quantity.product, total_sold_quantity.variant, ranking.sold_quantity, ranking.ranking_order
+from total_sold_quantity
+join ranking 
+on total_sold_quantity.product_code = ranking.product_code
+where ranking_order in (1,2,3);
